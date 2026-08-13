@@ -1,10 +1,13 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
   "name": "com.get4agent/marketplace",
-  "description": "Trust marketplace for AI agents: free KZ business-data utilities (IIN/BIN + IBAN validation, GLEIF LEI lookup, KZT/ECB rates, weather, Kazpost parcel tracking) and per-call purchase of KYA-verified API listings, governed by Regent Protocol.",
+  "description": "Free KZ agent utilities (Kazpost tracking, IIN/BIN, IBAN, LEI, FX) + governed API marketplace.",
   "version": "1.0.0",
   "websiteUrl": "https://get4agent.com",
   "remotes": [
-    { "type": "streamable-http", "url": "https://get4agent.com/mcp" }
+    {
+      "type": "streamable-http",
+      "url": "https://get4agent.com/mcp"
+    }
   ]
 }
