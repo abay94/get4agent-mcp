@@ -30,10 +30,26 @@ Free utilities (no account, no payment — call directly):
 
 ## Use it
 
-Point any MCP client at the remote server:
+**Remote (hosted)** — point any MCP client at the endpoint:
 
 ```json
 { "mcpServers": { "get4agent": { "url": "https://get4agent.com/mcp" } } }
+```
+
+**Local (stdio, via Docker)** — this repo also ships a zero-dependency stdio MCP server
+that proxies to the hosted endpoint, for clients that speak the local transport:
+
+```bash
+docker build -t get4agent-mcp .
+```
+```json
+{ "mcpServers": { "get4agent": { "command": "docker", "args": ["run", "-i", "--rm", "get4agent-mcp"] } } }
+```
+
+Or run it directly (Python 3, standard library only — nothing to install):
+
+```json
+{ "mcpServers": { "get4agent": { "command": "python", "args": ["server.py"] } } }
 ```
 
 Then `tools/list` to enumerate, `tools/call` to invoke. Free tools return results with
