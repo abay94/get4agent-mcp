@@ -25,6 +25,7 @@ from mcp.server.mcpserver import MCPServer
 MARKET = "https://get4agent.com"
 DIRECTORY_ORIGIN = "https://regentprotocol.org"  # hosts the public-key directory
 KEY_PATH = Path.home() / ".get4agent" / "agent.seed"
+PASSPORT_PATH = Path.home() / ".get4agent" / "passport.jwt"
 
 mcp = MCPServer("get4agent")
 
@@ -40,9 +41,28 @@ def _signer():
                         signature_agent=DIRECTORY_ORIGIN)
 
 
+def _bootstrap_token(signer) -> str:
+    """Identity-only passport for this key — minted once, cached, auto-renewed.
+    The private key NEVER leaves this machine; the platform only sees the public
+    half and attests "this key is this key" (zero authority until the owner
+    approves the claim e-mail)."""
+    if PASSPORT_PATH.exists():
+        return PASSPORT_PATH.read_text().strip()
+    r = httpx.post(f"{MARKET}/v1/agents/bootstrap",
+                   json={"jwk": signer.public_jwk}, timeout=30.0)
+    r.raise_for_status()
+    token = r.json()["agent_token"]
+    PASSPORT_PATH.write_text(token)
+    PASSPORT_PATH.chmod(0o600)
+    return token
+
+
 def _signed_headers(signer, method: str, url: str) -> dict:
     host = httpx.URL(url).host
-    return signer.sign(method, url, {"Host": host, "Content-Type": "application/json"})
+    h = signer.sign(method, url, {"Host": host, "Content-Type": "application/json"})
+    # Label must match the message signature's label (sig1) — the verifier pairs them.
+    h["Signature-Key"] = f'sig1=jwt;jwt="{_bootstrap_token(signer)}"'
+    return h
 
 
 def _post_signed(path: str, body: dict) -> httpx.Response:
@@ -61,18 +81,22 @@ def _get_signed(path: str) -> httpx.Response:
 
 @mcp.tool()
 def setup(contact_email: str, agent_name: str = "personal shopping agent") -> str:
-    """One-time onboarding. Registers this agent at get4agent under your email.
-    If the platform doesn't know this machine's key yet, returns a public-key block
-    to forward to the get4agent team first (one message), then run setup again."""
+    """One-time onboarding, fully automatic: generates this agent's own key (it
+    never leaves this machine), gets an identity-only bootstrap passport, and
+    self-registers at get4agent. The owner then approves via the claim e-mail —
+    authority always comes from a human click, never from a key."""
     signer = _signer()
     r = _post_signed("/v1/agents/register", {
         "name": agent_name, "contact_email": contact_email,
         "intent": "Buy digital goods on get4agent under my owner's mandate.",
     })
     if r.status_code == 401:
-        jwk = json.dumps(signer.public_jwk, separators=(",", ":"))
-        return ("The platform can't verify this key yet. Send this public key block "
-                f"to the get4agent team, then run setup again:\n\n{jwk}")
+        # Stale/expired bootstrap passport — mint a fresh one and retry once.
+        PASSPORT_PATH.unlink(missing_ok=True)
+        r = _post_signed("/v1/agents/register", {
+            "name": agent_name, "contact_email": contact_email,
+            "intent": "Buy digital goods on get4agent under my owner's mandate.",
+        })
     r.raise_for_status()
     reg = r.json()
     return (f"Registered (status: {reg.get('status')}). A claim e-mail was sent to "
@@ -85,7 +109,7 @@ def status() -> str:
     """Registration + approval state of this agent."""
     r = _get_signed("/v1/agents/registration")
     if r.status_code == 401:
-        return "Key not known to the platform yet — run setup first."
+        return "Signature not accepted — run setup to refresh the passport."
     if r.status_code == 404:
         return "Not registered yet — run setup."
     return json.dumps(r.json(), ensure_ascii=False, indent=1)
