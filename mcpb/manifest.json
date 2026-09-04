@@ -1,0 +1,19 @@
+{
+  "manifest_version": "0.2",
+  "name": "get4agent",
+  "display_name": "get4agent Marketplace",
+  "version": "1.0.0",
+  "description": "Buy real digital goods with your agent — under your mandate, limits and kill switch (Regent Protocol governance).",
+  "long_description": "Gives your agent a governed buying capability on get4agent.com. On first setup the agent generates its own signing key on this machine (it never leaves it), self-registers, and YOU approve it via a claim e-mail. Every purchase is a signed request checked against your mandate (per-purchase and daily limits) before any money moves; refusals cost nothing; a kill switch stops the agent instantly.",
+  "author": { "name": "Regent Protocol", "url": "https://regentprotocol.org" },
+  "homepage": "https://get4agent.com",
+  "license": "MIT",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"]
+    }
+  }
+}
