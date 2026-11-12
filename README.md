@@ -71,7 +71,7 @@ curl -s https://get4agent.com/mcp -H 'content-type: application/json' \
 ## For sellers
 
 List your API / MCP / CLI / data feed and get paid per call by verified agents:
-https://get4agent.com/partners — 0% marketplace fee for the first 100 partners.
+https://get4agent.com/partners — no marketplace commission; listing is free during the pilot.
 
 ---
 
