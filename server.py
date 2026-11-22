@@ -12,6 +12,7 @@ Stdlib only — nothing to pip install, so the build/introspection never breaks 
 from __future__ import annotations
 
 import json
+import http.client
 import os
 import sys
 import urllib.request
@@ -51,26 +52,25 @@ TOOLS = [
 ]
 
 
-def _forward(name: str, arguments: dict) -> str:
-    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                          "params": {"name": name, "arguments": arguments}}).encode()
+def _forward(method: str, params: dict, request_id) -> dict:
+    payload = json.dumps({"jsonrpc": "2.0", "id": request_id,
+                          "method": method, "params": params}).encode()
     req = urllib.request.Request(REMOTE, data=payload,
-                                 headers={"content-type": "application/json"})
+                                 headers={"content-type": "application/json",
+                                          "accept": "application/json, text/event-stream"})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode())
-    except Exception as exc:  # noqa: BLE001
-        return f"error contacting {REMOTE}: {exc}"
-    if data.get("error"):
-        return f"error: {data['error']}"
-    result = data.get("result", data)
-    content = result.get("content") if isinstance(result, dict) else None
-    if isinstance(content, list):
-        texts = [c.get("text", "") for c in content
-                 if isinstance(c, dict) and c.get("type") == "text"]
-        if texts:
-            return "\n".join(texts)
-    return json.dumps(result, ensure_ascii=False)
+        if not isinstance(data, dict):
+            raise ValueError("Invalid upstream response")
+        if isinstance(data.get("error"), dict):
+            return {"jsonrpc": "2.0", "id": request_id, "error": data["error"]}
+        if not isinstance(data.get("result"), dict):
+            raise ValueError("Missing upstream result")
+        return {"jsonrpc": "2.0", "id": request_id, "result": data["result"]}
+    except (OSError, ValueError, http.client.HTTPException):
+        return {"jsonrpc": "2.0", "id": request_id,
+                "error": {"code": -32603, "message": "Marketplace unavailable or invalid response"}}
 
 
 def _send(msg: dict) -> None:
@@ -90,9 +90,7 @@ def _handle(msg: dict):
     if method == "tools/list":
         return {"jsonrpc": "2.0", "id": mid, "result": {"tools": TOOLS}}
     if method == "tools/call":
-        params = msg.get("params") or {}
-        text = _forward(params.get("name", ""), params.get("arguments") or {})
-        return {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}]}}
+        return _forward(method, msg.get("params") or {}, mid)
     if method == "ping":
         return {"jsonrpc": "2.0", "id": mid, "result": {}}
     if mid is not None:  # unknown method with an id → JSON-RPC error

@@ -16,7 +16,7 @@ payment**.
 Marketplace:
 - `search_listings` — search the verified catalog (query, category, kind)
 - `get_listing` — full listing detail (price, seller KYA status, seller DID)
-- `verify_agent` — check an agent's KYA / identity status
+- `verify_agent` — present in the retained local list; backend availability needs reconciliation
 
 Free utilities (no account, no payment — call directly):
 - `validate_iin` — Kazakhstan **IIN / BIN** validation (ГОСТ checksum) + parse
@@ -55,6 +55,38 @@ Or run it directly (Python 3, standard library only — nothing to install):
 Then `tools/list` to enumerate, `tools/call` to invoke. Free tools return results with
 no authentication. Buying a governed listing requires a Regent control key or a bound
 x402 wallet — see [AGENTS.md](https://get4agent.com/AGENTS.md).
+
+The stdio proxy retains its original static tool list pending review with its
+maintainer. Enumeration works without contacting the hosted endpoint, supporting
+directory introspection. Known differences from the backend remain unresolved;
+this list is not proof that every advertised tool is currently callable.
+Calls use `GET4AGENT_MCP_URL` (default `https://get4agent.com/mcp`). The proxy
+expects JSON responses; it is not a general SSE client.
+
+The changes to response representation, truncation and desktop key
+initialization are under review for original intent and host compatibility.
+
+Catalog search uses `query`, not `q`. Omit `category` to search all available
+categories. Search does not create signing keys or authorize a purchase. Remote
+catalog tools are read-only; the separate buyer connectors have their own purchase
+flow.
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_listings","arguments":{"query":"courier","limit":20,"offset":0}}}
+```
+
+## Development checks
+
+```bash
+python3 -m unittest discover -s tests -v
+node --test tests/*.test.cjs
+```
+
+Python buyer tests require `httpx`; the SDK registration boundary is stubbed, and
+HTTP responses are local fixtures. Tests do not call live services, generate keys
+or make purchases. The existing `get4agent.mcpb` archive is a release artifact;
+source changes in `mcpb/` must be packaged and validated before distributing a new
+desktop extension. A passing fixture suite does not establish deployment health.
 
 Example (list tools):
 ```bash

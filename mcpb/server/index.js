@@ -96,7 +96,7 @@ const TOOLS = [
   { name: 'search_catalog',
     description: 'Search get4agent\'s catalog of real goods (public).',
     inputSchema: { type: 'object', properties: {
-      query: { type: 'string' }, category: { type: 'string', description: 'default: gaming' } } } },
+      query: { type: 'string' }, category: { type: 'string', description: 'Optional category slug; omit to search all available categories' } } } },
   { name: 'buy',
     description: 'Buy a listing. Signed by this agent\'s key; the owner\'s mandate ' +
       '(per-purchase and daily limits) is enforced BEFORE any money moves. Returns the ' +
@@ -107,6 +107,21 @@ const TOOLS = [
 ];
 
 async function callTool(name, args) {
+  if (name === 'search_catalog') {
+    const r = await fetch(`${MARKET}/mcp`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'search_listings',
+                  arguments: { query: args.query || '', category: args.category || '' } } }),
+    });
+    if (!r.ok) throw new Error(`Marketplace search failed: HTTP ${r.status}`);
+    const j = await r.json();
+    if (j.error) throw new Error(j.error.message || 'Marketplace search failed');
+    if (!j.result || !Array.isArray(j.result.content)) {
+      throw new Error('Invalid marketplace search response');
+    }
+    return j.result;
+  }
   const key = loadKey();
   if (name === 'setup') {
     let r = await signedFetch(key, 'POST', '/v1/agents/register', {
@@ -133,16 +148,6 @@ async function callTool(name, args) {
     if (r.status === 401) return 'Signature not accepted — run setup to refresh the passport.';
     if (r.status === 404) return 'Not registered yet — run setup.';
     return JSON.stringify(await r.json(), null, 1);
-  }
-  if (name === 'search_catalog') {
-    const r = await fetch(`${MARKET}/mcp`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
-        params: { name: 'search_listings',
-                  arguments: { q: args.query || '', category: args.category || 'gaming' } } }),
-    });
-    const j = await r.json();
-    return JSON.stringify(j.result || {}, null, 0).slice(0, 4000);
   }
   if (name === 'buy') {
     const body = { agent_id: 'mcp-buyer' };
@@ -182,8 +187,10 @@ rl.on('line', async (line) => {
     } else if (method === 'tools/list') {
       out({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
     } else if (method === 'tools/call') {
-      const text = await callTool(params.name, params.arguments || {});
-      out({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }] } });
+      const value = await callTool(params.name, params.arguments || {});
+      const result = params.name === 'search_catalog' ? value :
+        { content: [{ type: 'text', text: value }] };
+      out({ jsonrpc: '2.0', id, result });
     } else if (method === 'ping') {
       out({ jsonrpc: '2.0', id, result: {} });
     } else if (id !== undefined) {

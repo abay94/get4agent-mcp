@@ -116,15 +116,23 @@ def status() -> str:
 
 
 @mcp.tool()
-def search_catalog(query: str = "", category: str = "gaming") -> str:
+def search_catalog(query: str = "", category: str = "") -> str:
     """Search get4agent's catalog of real goods (public, no auth)."""
     r = httpx.post(f"{MARKET}/mcp", json={
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": {"name": "search_listings",
-                   "arguments": {"q": query, "category": category}},
+                   "arguments": {"query": query, "category": category}},
     }, timeout=30.0)
     r.raise_for_status()
-    return json.dumps(r.json().get("result", {}), ensure_ascii=False)[:4000]
+    data = r.json()
+    if data.get("error"):
+        raise RuntimeError(data["error"].get("message", "Marketplace search failed"))
+    result = data.get("result")
+    if not isinstance(result, dict):
+        raise RuntimeError("Invalid marketplace search response")
+    if result.get("isError"):
+        raise RuntimeError(json.dumps(result.get("content", []), ensure_ascii=False))
+    return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
