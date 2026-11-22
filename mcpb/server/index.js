@@ -183,7 +183,7 @@ rl.on('line', async (line) => {
       out({ jsonrpc: '2.0', id, result: {
         protocolVersion: params?.protocolVersion || '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'get4agent', version: '1.0.0' } } });
+        serverInfo: { name: 'get4agent', version: '1.0.1' } } });
     } else if (method === 'tools/list') {
       out({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
     } else if (method === 'tools/call') {

@@ -21,6 +21,8 @@ REMOTE = os.environ.get("GET4AGENT_MCP_URL", "https://get4agent.com/mcp")
 PROTOCOL = "2024-11-05"
 
 S = {"type": "string"}
+B = {"type": "boolean"}
+I = {"type": "integer"}
 
 
 def _tool(name, desc, props, required):
@@ -28,13 +30,16 @@ def _tool(name, desc, props, required):
             "inputSchema": {"type": "object", "properties": props, "required": required}}
 
 
+# Kept static on purpose: directories introspect this server without network access.
+# It mirrors `tools/list` of the hosted endpoint; tests/test_discovery.py pins the names.
 TOOLS = [
-    _tool("search_listings", "Search the GET4AGENT MARKET catalog of KYA-verified API listings.",
-          {"query": S, "category": S, "kind": S, "verified_only": {"type": "boolean"}}, []),
-    _tool("get_listing", "Get full detail (price, seller KYA status, seller DID) for one listing.",
+    _tool("list_categories", "List the catalog's categories with the number of listings in each.",
+          {"verified_only": B}, []),
+    _tool("search_listings", "Search the GET4AGENT MARKET catalog, newest first, in pages "
+          "(has_more / next_offset). Omit category to search all categories.",
+          {"query": S, "category": S, "kind": S, "verified_only": B, "limit": I, "offset": I}, []),
+    _tool("get_listing", "Get full detail (price, seller, seller verification) for one listing.",
           {"listing_id": S}, ["listing_id"]),
-    _tool("verify_agent", "Check an agent's KYA / identity status.",
-          {"agent_id": S}, ["agent_id"]),
     _tool("track_parcel", "Track a Kazakhstan Post (Kazpost) parcel by barcode — status + route history.",
           {"track": S}, ["track"]),
     _tool("validate_iin", "Validate a Kazakhstan IIN / BIN (checksum) and parse it.",

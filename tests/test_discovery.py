@@ -36,6 +36,17 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(reply['id'], 42)
         self.assertIn('search_listings', [tool['name'] for tool in reply['result']['tools']])
 
+    def test_static_list_mirrors_the_hosted_endpoint(self):
+        # The names the hosted endpoint answers to. A tool it does not serve must not be
+        # advertised here: calling it returns "unknown tool".
+        names = [tool['name'] for tool in proxy.TOOLS]
+        self.assertEqual(sorted(names), sorted([
+            'list_categories', 'search_listings', 'get_listing', 'validate_iin',
+            'validate_kz_iban', 'lei_lookup', 'kzt_rates', 'fx_rates', 'weather', 'track_parcel']))
+        search = next(t for t in proxy.TOOLS if t['name'] == 'search_listings')
+        self.assertLessEqual({'query', 'category', 'limit', 'offset'},
+                             set(search['inputSchema']['properties']))
+
     def test_call_preserves_structured_empty_result(self):
         result = {'content': [{'type': 'text', 'text': 'No matches'}],
                   'structuredContent': {'listings': [], 'has_more': False}, 'isError': False}

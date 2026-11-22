@@ -14,9 +14,9 @@ payment**.
 ## Tools
 
 Marketplace:
-- `search_listings` — search the verified catalog (query, category, kind)
-- `get_listing` — full listing detail (price, seller KYA status, seller DID)
-- `verify_agent` — present in the retained local list; backend availability needs reconciliation
+- `list_categories` — the catalog's categories with the number of listings in each
+- `search_listings` — search the verified catalog (query, category, kind), newest first, in pages
+- `get_listing` — full listing detail (price, seller, seller verification)
 
 Free utilities (no account, no payment — call directly):
 - `validate_iin` — Kazakhstan **IIN / BIN** validation (ГОСТ checksum) + parse
@@ -56,20 +56,18 @@ Then `tools/list` to enumerate, `tools/call` to invoke. Free tools return result
 no authentication. Buying a governed listing requires a Regent control key or a bound
 x402 wallet — see [AGENTS.md](https://get4agent.com/AGENTS.md).
 
-The stdio proxy retains its original static tool list pending review with its
-maintainer. Enumeration works without contacting the hosted endpoint, supporting
-directory introspection. Known differences from the backend remain unresolved;
-this list is not proof that every advertised tool is currently callable.
-Calls use `GET4AGENT_MCP_URL` (default `https://get4agent.com/mcp`). The proxy
-expects JSON responses; it is not a general SSE client.
+The stdio proxy keeps a static tool list, so `tools/list` answers without contacting
+the hosted endpoint and directories can introspect the server offline. The list mirrors
+the hosted endpoint's `tools/list`. Each `tools/call` is forwarded to
+`GET4AGENT_MCP_URL` (default `https://get4agent.com/mcp`) and the hosted answer is
+returned as is, including `structuredContent` and `isError`. The proxy expects JSON
+responses; it is not a general SSE client.
 
-The changes to response representation, truncation and desktop key
-initialization are under review for original intent and host compatibility.
-
-Catalog search uses `query`, not `q`. Omit `category` to search all available
-categories. Search does not create signing keys or authorize a purchase. Remote
-catalog tools are read-only; the separate buyer connectors have their own purchase
-flow.
+Catalog search uses `query`. Omit `category` to search all categories; results come in
+pages of up to 50 (`limit`, `offset`, `has_more`, `next_offset`). Search needs no
+account, creates no signing key and authorizes no purchase. The hosted catalog tools are
+read-only; the buyer connectors (`agent.py`, the desktop extension in `mcpb/`) have their
+own purchase flow.
 
 ```json
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_listings","arguments":{"query":"courier","limit":20,"offset":0}}}
@@ -84,9 +82,15 @@ node --test tests/*.test.cjs
 
 Python buyer tests require `httpx`; the SDK registration boundary is stubbed, and
 HTTP responses are local fixtures. Tests do not call live services, generate keys
-or make purchases. The existing `get4agent.mcpb` archive is a release artifact;
-source changes in `mcpb/` must be packaged and validated before distributing a new
-desktop extension. A passing fixture suite does not establish deployment health.
+or make purchases.
+
+`get4agent.mcpb` is the packaged desktop extension: a zip of `mcpb/manifest.json` and
+`mcpb/server/index.js`. After changing either file, bump `version` in the manifest and
+repack:
+
+```bash
+(cd mcpb && zip -X -r ../get4agent.mcpb manifest.json server/index.js)
+```
 
 Example (list tools):
 ```bash
