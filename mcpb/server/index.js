@@ -13,7 +13,6 @@ const path = require('node:path');
 const readline = require('node:readline');
 
 const MARKET = 'https://get4agent.com';
-const SIGNATURE_AGENT = 'https://regentprotocol.org';
 const DIR = path.join(os.homedir(), '.get4agent');
 const KEY_FILE = path.join(DIR, 'agent-node.pem');
 const PASSPORT_FILE = path.join(DIR, 'passport-node.jwt');
@@ -48,36 +47,81 @@ async function passport(key) {
   return token;
 }
 
-// ── RFC 9421 signing (mirrors regent-httpsig EgressSigner byte-for-byte) ─────
-function signHeaders(key, method, urlStr) {
+// ── RFC 9421 signing, the AAuth way (draft-hardt-oauth-aauth-protocol-11 §11.3.3) ──
+// Mirrors regent-httpsig `EgressSigner.sign_aauth` byte for byte (tests/test_signing.py
+// compares the two on the same key, token, time and requests, and gives what this file
+// emits to that library's verifier, the one get4agent runs): the agent token
+// rides in Signature-Key under the `jwt` scheme; the signature covers
+// `@method @authority @path signature-key`, plus `content-digest content-type` when
+// there is a body (and a Content-Digest header is sent). `created` only: no keyid,
+// no alg, no tag, no Signature-Agent — the key is the token's cnf.jwk.
+//
+// Until 27.11.2026 this signed the Web Bot Auth way and added Signature-Key afterwards.
+// get4agent has required the -11 form since 06.10.2026 and answered every such request
+// 401 (invalid_input: signature does not cover signature-key).
+const LABEL = 'sig';
+
+function contentDigest(bodyText) {
+  const hash = crypto.createHash('sha256').update(Buffer.from(bodyText, 'utf8')).digest('base64');
+  return `sha-256=:${hash}:`;
+}
+
+// `bodyText` is the exact string that will be sent (or undefined/'' for no body).
+function signHeaders(key, method, urlStr, token, bodyText) {
   const u = new URL(urlStr);
   const created = Math.floor(Date.now() / 1000);
-  const expires = created + 300;
-  const params = `("@method" "@authority" "@path" "signature-agent")` +
-    `;created=${created};keyid="${key.keyid}";alg="ed25519";expires=${expires};tag="web-bot-auth"`;
-  const agent = `"${SIGNATURE_AGENT}"`;
-  const base =
-    `"@method": ${method.toUpperCase()}\n` +
-    `"@authority": ${u.host}\n` +
-    `"@path": ${u.pathname}\n` +
-    `"signature-agent": ${agent}\n` +
-    `"@signature-params": ${params}`;
-  const sig = crypto.sign(null, Buffer.from(base), key.priv);
-  return {
-    'Signature-Agent': agent,
-    'Signature-Input': `sig1=${params}`,
-    'Signature': `sig1=:${sig.toString('base64')}:`,
+  const headers = { 'Signature-Key': `${LABEL}=jwt;jwt="${token}"` };
+  const covered = ['@method', '@authority', '@path', 'signature-key'];
+  if (bodyText) {
+    headers['Content-Digest'] = contentDigest(bodyText);
+    headers['Content-Type'] = 'application/json';
+    covered.push('content-digest', 'content-type');
+  }
+  const value = {
+    '@method': method.toUpperCase(),
+    '@authority': u.host,          // lower-case host, default port omitted (WHATWG URL)
+    '@path': u.pathname || '/',
+    'signature-key': headers['Signature-Key'],
+    'content-digest': headers['Content-Digest'],
+    'content-type': headers['Content-Type'],
   };
+  const params = `(${covered.map((c) => `"${c}"`).join(' ')});created=${created}`;
+  const base = covered.map((c) => `"${c}": ${value[c]}`).join('\n') +
+    `\n"@signature-params": ${params}`;
+  const sig = crypto.sign(null, Buffer.from(base, 'utf8'), key.priv);
+  headers['Signature-Input'] = `${LABEL}=${params}`;
+  headers['Signature'] = `${LABEL}=:${sig.toString('base64')}:`;
+  return headers;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The path of a purchase. `listing_id` comes from the model, which may have read it in
+// seller-written text: anything that is not a UUID is refused BEFORE a key is loaded or a
+// byte is sent. Otherwise `../budget/token` would become a correctly signed
+// `POST /v1/budget/token` (`new URL()` resolves dot segments before the path is signed).
+// The segment is percent-encoded as well, so the rule does not rest on the pattern alone.
+function callPath(listingId) {
+  if (typeof listingId !== 'string' || !UUID_RE.test(listingId)) {
+    throw new Error('listing_id must be a listing UUID from search_catalog ' +
+      '(xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). Nothing was sent.');
+  }
+  return `/v1/call/${encodeURIComponent(listingId)}`;
 }
 
 async function signedFetch(key, method, pathStr, body) {
   const url = `${MARKET}${pathStr}`;
-  const headers = {
-    'content-type': 'application/json',
-    ...signHeaders(key, method, url),
-    'Signature-Key': `sig1=jwt;jwt="${await passport(key)}"`,
-  };
-  return fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  // Sign only what was meant: if URL parsing would change the path (dot segments, a
+  // query, a fragment, another host), nothing is signed and nothing is sent.
+  const parsed = new URL(url);
+  if (parsed.origin !== MARKET || parsed.pathname !== pathStr || parsed.search || parsed.hash) {
+    throw new Error('refusing to sign a request whose path is not the intended one. ' +
+      'Nothing was sent.');
+  }
+  // Serialized once: the digest is over exactly the bytes that are sent.
+  const bodyText = body ? JSON.stringify(body) : undefined;
+  const headers = signHeaders(key, method, url, await passport(key), bodyText);
+  return fetch(url, { method, headers, body: bodyText });
 }
 
 // ── tools ────────────────────────────────────────────────────────────────────
@@ -122,6 +166,8 @@ async function callTool(name, args) {
     }
     return j.result;
   }
+  // Validated before the key is touched: a refused listing_id creates and sends nothing.
+  const buyPath = name === 'buy' ? callPath(args.listing_id) : null;
   const key = loadKey();
   if (name === 'setup') {
     let r = await signedFetch(key, 'POST', '/v1/agents/register', {
@@ -153,7 +199,7 @@ async function callTool(name, args) {
     const body = { agent_id: 'mcp-buyer' };
     if (args.game_user_id) body.gameUserId = args.game_user_id;
     if (args.game_server_id) body.gameServerId = args.game_server_id;
-    const r = await signedFetch(key, 'POST', `/v1/call/${args.listing_id}`, body);
+    const r = await signedFetch(key, 'POST', buyPath, body);
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
       const det = data.detail || data;
@@ -183,7 +229,7 @@ rl.on('line', async (line) => {
       out({ jsonrpc: '2.0', id, result: {
         protocolVersion: params?.protocolVersion || '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'get4agent', version: '1.0.1' } } });
+        serverInfo: { name: 'get4agent', version: '1.0.2' } } });
     } else if (method === 'tools/list') {
       out({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
     } else if (method === 'tools/call') {

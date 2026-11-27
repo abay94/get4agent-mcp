@@ -81,8 +81,23 @@ node --test tests/*.test.cjs
 ```
 
 Python buyer tests require `httpx`; the SDK registration boundary is stubbed, and
-HTTP responses are local fixtures. Tests do not call live services, generate keys
-or make purchases.
+HTTP responses are local fixtures. Tests do not call live services or make purchases.
+
+The signing tests (`tests/test_signing.py`, `tests/desktop-signing.test.cjs`) check that
+both buyer connectors sign the way get4agent verifies: AAuth
+(draft-hardt-oauth-aauth-protocol-11) — the agent token from `/v1/agents/bootstrap` in
+`Signature-Key` under the `jwt` scheme, and a signature over
+`@method @authority @path signature-key`, plus `content-digest content-type` and a
+`Content-Digest` header when there is a body. `test_signing.py` hands the requests both
+connectors produce to the `regent-httpsig` verifier (the one the server runs) and
+compares the desktop connector's headers byte for byte with that library's signer; it
+needs `regent-httpsig[aauth]` importable and `node` on `PATH`, and reports a skip
+otherwise. These tests create throwaway keys in a temporary directory, never in
+`~/.get4agent`.
+
+`agent.py` depends on `mcp`, `httpx` and `regent-httpsig>=0.7.3` (declared in its
+script header). `server.py` and the desktop extension have no third-party dependencies:
+the extension signs with `node:crypto` alone.
 
 `get4agent.mcpb` is the packaged desktop extension: a zip of `mcpb/manifest.json` and
 `mcpb/server/index.js`. After changing either file, bump `version` in the manifest and
